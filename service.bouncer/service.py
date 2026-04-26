@@ -2,7 +2,7 @@
 Bouncer — Rating-based playback control for Kodi
 Addon ID: service.bouncer
 Author:   dotJustin
-Version:  1.0.0
+Version:  1.0.1
 
 Intercepts video playback and requires a PIN to continue if the content's
 rating is in the user's blocked list. Designed for Kodi 21 Omega on Android TV
@@ -15,7 +15,6 @@ import xbmcgui
 import json
 import time
 import threading
-import hashlib
 
 try:
     import urllib.request as urllib_request
@@ -67,6 +66,9 @@ RATING_SETTING_KEY = {
     'TVNR': 'block_TVNR',
 }
 
+# Maximum number of TMDb lookup results to keep in memory
+_TMDB_CACHE_MAX = 200
+
 
 def normalize_rating(raw):
     """Return the canonical rating key for a raw MPAA/TV rating string.
@@ -76,8 +78,7 @@ def normalize_rating(raw):
     """
     if not raw:
         return ''
-    candidate = RATING_NORM.get(raw.strip().upper(), '')
-    return candidate
+    return RATING_NORM.get(raw.strip().upper(), '')
 
 
 def is_rating_blocked(canonical, addon):
@@ -104,7 +105,7 @@ def log(msg, level=xbmc.LOGDEBUG):
     DEBUG messages are suppressed unless debug_log is enabled in settings.
     INFO and above always log.
 
-    IMPORTANT: Never pass PIN values to this function.
+    IMPORTANT: Never pass PIN values or raw API keys to this function.
     """
     addon = xbmcaddon.Addon()
     if level >= xbmc.LOGINFO or addon.getSettingBool('debug_log'):
@@ -121,11 +122,15 @@ class BouncerPlayer(xbmc.Player):
     def __init__(self):
         super(BouncerPlayer, self).__init__()
         self.addon = xbmcaddon.Addon()
+        # Lock protecting both unlocked_until and check_in_progress, which are
+        # read on Kodi's player thread and written on background threads.
+        self._lock = threading.Lock()
         # Timestamp after which the session is considered unlocked (0 = locked)
         self.unlocked_until = 0
         # Guard against re-entrant checks if two events fire close together
         self.check_in_progress = False
-        # In-memory cache: display_title / imdb_id → canonical rating string
+        # In-memory cache: imdb_id or display_title → canonical rating string
+        # Evicted when it exceeds _TMDB_CACHE_MAX entries (oldest-first).
         self._tmdb_cache = {}
 
     # ------------------------------------------------------------------
@@ -148,16 +153,18 @@ class BouncerPlayer(xbmc.Player):
         if not self.addon.getSettingBool('enabled'):
             return
 
-        if self.unlocked_until > time.time():
-            log('Session unlocked — skipping PIN check')
-            return
-
-        if self.check_in_progress:
-            log('Check already in progress — skipping')
-            return
-
-        if not self.isPlayingVideo():
-            return
+        # Hold the lock while reading both flags and setting check_in_progress,
+        # so we never spawn two concurrent checks or miss an unlock.
+        with self._lock:
+            if self.unlocked_until > time.time():
+                log('Session unlocked — skipping PIN check')
+                return
+            if self.check_in_progress:
+                log('Check already in progress — skipping')
+                return
+            if not self.isPlayingVideo():
+                return
+            self.check_in_progress = True
 
         # Run the blocking check in a background thread so we never stall
         # Kodi's player thread (which would freeze the UI).
@@ -170,11 +177,11 @@ class BouncerPlayer(xbmc.Player):
 
     def _check_and_gate(self):
         """Determine content rating and gate playback if necessary."""
-        self.check_in_progress = True
         try:
             self._do_check()
         finally:
-            self.check_in_progress = False
+            with self._lock:
+                self.check_in_progress = False
 
     def _do_check(self):
         # ------------------------------------------------------------------
@@ -280,6 +287,9 @@ class BouncerPlayer(xbmc.Player):
                         imdb_id, display_title, is_tv, tmdb_api_key
                     )
                     self._tmdb_cache[cache_key] = canonical
+                    # Evict the oldest entry if the cache has grown too large
+                    if len(self._tmdb_cache) > _TMDB_CACHE_MAX:
+                        self._tmdb_cache.pop(next(iter(self._tmdb_cache)))
 
             except Exception as exc:
                 log('Method 3 error: {}'.format(exc), xbmc.LOGWARNING)
@@ -324,32 +334,47 @@ class BouncerPlayer(xbmc.Player):
     # TMDb API helper
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _safe_url(url):
+        """Return url with the api_key value redacted for safe debug logging."""
+        if 'api_key=' not in url:
+            return url
+        before, rest = url.split('api_key=', 1)
+        end = rest.find('&')
+        suffix = rest[end:] if end != -1 else ''
+        return '{}api_key=***{}'.format(before, suffix)
+
     def _fetch_tmdb_rating(self, imdb_id, display_title, is_tv, api_key):
         """Query the TMDb API and return a canonical rating string.
 
-        Uses the IMDB ID when available; falls back to a title search.
+        When an IMDB ID is available (e.g. tt1234567), uses TMDb's Find
+        endpoint to resolve it to a TMDb integer ID first — IMDB IDs cannot
+        be used directly in the /tv/{id}/ or /movie/{id}/ endpoints.
+        Falls back to a title search when no ID is available.
         Returns an empty string if no US certification can be found.
         """
         def make_request(url):
             req = urllib_request.Request(url)
             req.add_header('User-Agent', 'Bouncer/1.0 Kodi Addon')
+            log('Method 3 request: {}'.format(self._safe_url(url)))
             with urllib_request.urlopen(req, timeout=5) as resp:
                 return json.loads(resp.read().decode('utf-8'))
 
         tmdb_id = None
 
         if imdb_id:
-            # We already have an ID — use it directly
-            if is_tv:
-                ratings_url = (
-                    'https://api.themoviedb.org/3/tv/{}/content_ratings'
-                    '?api_key={}'.format(imdb_id, api_key)
-                )
-            else:
-                ratings_url = (
-                    'https://api.themoviedb.org/3/movie/{}/release_dates'
-                    '?api_key={}'.format(imdb_id, api_key)
-                )
+            # Use TMDb's Find endpoint to convert the IMDB ID (tt-prefixed
+            # string) into a TMDb integer ID before fetching ratings.
+            find_url = (
+                'https://api.themoviedb.org/3/find/{}'
+                '?api_key={}&external_source=imdb_id'.format(imdb_id, api_key)
+            )
+            find_data = make_request(find_url)
+            key = 'tv_results' if is_tv else 'movie_results'
+            results = find_data.get(key, [])
+            if not results:
+                raise ValueError('No TMDb results for IMDB ID {}'.format(imdb_id))
+            tmdb_id = str(results[0]['id'])
         else:
             # No ID — search by title
             year_str = xbmc.getInfoLabel('VideoPlayer.Year').strip()
@@ -370,19 +395,19 @@ class BouncerPlayer(xbmc.Player):
             results = search_data.get('results', [])
             if not results:
                 raise ValueError('No TMDb search results for "{}"'.format(display_title))
-
             tmdb_id = str(results[0]['id'])
 
-            if is_tv:
-                ratings_url = (
-                    'https://api.themoviedb.org/3/tv/{}/content_ratings'
-                    '?api_key={}'.format(tmdb_id, api_key)
-                )
-            else:
-                ratings_url = (
-                    'https://api.themoviedb.org/3/movie/{}/release_dates'
-                    '?api_key={}'.format(tmdb_id, api_key)
-                )
+        # Fetch US certification using the resolved TMDb integer ID
+        if is_tv:
+            ratings_url = (
+                'https://api.themoviedb.org/3/tv/{}/content_ratings'
+                '?api_key={}'.format(tmdb_id, api_key)
+            )
+        else:
+            ratings_url = (
+                'https://api.themoviedb.org/3/movie/{}/release_dates'
+                '?api_key={}'.format(tmdb_id, api_key)
+            )
 
         data = make_request(ratings_url)
 
@@ -400,7 +425,7 @@ class BouncerPlayer(xbmc.Player):
                 break
 
         canonical = normalize_rating(cert)
-        log('Method 3 API result: raw="{}" canonical="{}"'.format(cert, canonical))
+        log('Method 3 result: raw="{}" canonical="{}"'.format(cert, canonical))
         return canonical
 
     # ------------------------------------------------------------------
@@ -414,7 +439,7 @@ class BouncerPlayer(xbmc.Player):
         which is the only usable dialog type without a physical keyboard.
         """
         # Pause before showing the dialog
-        xbmc.Player().pause()
+        self.pause()
         xbmc.sleep(200)
 
         result = xbmcgui.Dialog().input(
@@ -425,7 +450,7 @@ class BouncerPlayer(xbmc.Player):
         # --- Cancelled (user pressed Back / closed dialog) ---------------
         if result == '':
             log('PIN dialog cancelled — stopping playback', xbmc.LOGINFO)
-            xbmc.Player().stop()
+            self.stop()
             xbmc.executebuiltin('ActivateWindow(Home)')
             return
 
@@ -434,10 +459,11 @@ class BouncerPlayer(xbmc.Player):
             log('Correct PIN entered — access granted', xbmc.LOGINFO)
             unlock_mins = int(self.addon.getSetting('unlock_duration') or 0)
             if unlock_mins > 0:
-                self.unlocked_until = time.time() + (unlock_mins * 60)
+                with self._lock:
+                    self.unlocked_until = time.time() + (unlock_mins * 60)
                 log('Session unlocked for {} minutes'.format(unlock_mins))
             # Toggle pause to resume playback
-            xbmc.Player().pause()
+            self.pause()
             xbmcgui.Dialog().notification(
                 'Bouncer',
                 'Access granted \u2713',
@@ -448,7 +474,7 @@ class BouncerPlayer(xbmc.Player):
 
         # --- Incorrect PIN -----------------------------------------------
         log('Incorrect PIN entered — stopping playback', xbmc.LOGINFO)
-        xbmc.Player().stop()
+        self.stop()
         xbmcgui.Dialog().ok(
             'Bouncer \u2014 Access Denied',
             '{}\n{}\n\nIncorrect PIN.'.format(display_title, reason)

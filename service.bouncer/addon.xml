@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon id="service.bouncer"
        name="Bouncer"
-       version="1.0.0"
+       version="1.0.1"
        provider-name="dotJustin">
 
   <requires>
@@ -12,7 +12,11 @@
   <extension point="xbmc.service" library="service.py" start="login"/>
 
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_GB">Rating-based playback control for Kodi</summary>
+    <summary lang="en">Rating-based playback control for Kodi</summary>
+    <description lang="en">Intercepts video playback and requires a PIN to continue if the content rating is in your blocked list. Supports MPAA movie ratings (G through NR) and US TV ratings (TV-Y through TV-NR). Works with Umbrella, TMDbHelper, and any Kodi video source that passes rating metadata.</description>
+    <news>1.0.1 — Fix thread safety, TMDb IMDB ID lookup, and anonymous player instances. Upgrade settings to Kodi 21 format.</news>
+    <source>https://github.com/dot-Justin/Bouncer</source>
+    <license>MIT</license>
     <platform>all</platform>
   </extension>
 

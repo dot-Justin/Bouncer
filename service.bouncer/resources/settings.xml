@@ -1,78 +1,87 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<settings>
+<settings version="2">
 
-  <!-- ================================================================
-       Category 1: General
-       ================================================================ -->
-  <category label="General">
+  <section id="bouncer">
 
-    <setting id="enabled" type="bool" label="Enable Bouncer" default="true"/>
+    <!-- ================================================================
+         Category: General
+         ================================================================ -->
+    <category id="general" label="General">
 
-    <setting id="pin_code" type="text" label="PIN Code" option="hidden" default="1234"/>
+      <group id="general_switch">
+        <setting id="enabled" type="bool" label="Enable Bouncer" default="true"/>
+      </group>
 
-    <setting id="unlock_duration" type="slider"
-             label="Minutes unlocked after correct PIN"
-             default="0" range="0,5,60" option="int"/>
+      <group id="general_pin">
+        <setting id="pin_code" type="text" label="PIN Code" option="hidden" default="1234"/>
+        <setting id="unlock_duration" type="slider"
+                 label="Minutes unlocked after correct PIN"
+                 default="0" range="0,5,60" option="int"/>
+        <setting type="lsep" label="Set to 0 to require PIN for every title."/>
+      </group>
 
-    <!-- Static hint for unlock_duration -->
-    <setting type="lsep" label="Set to 0 to require PIN for every title."/>
+    </category>
 
-  </category>
+    <!-- ================================================================
+         Category: Movie Ratings
+         ================================================================ -->
+    <category id="movie_ratings" label="Movie Ratings">
 
-  <!-- ================================================================
-       Category 2: Movie Ratings
-       ================================================================ -->
-  <category label="Movie Ratings">
+      <group id="movie_hint">
+        <setting type="lsep" label="Toggle ON to block that rating and require PIN."/>
+      </group>
 
-    <!-- Static instruction label -->
-    <setting type="lsep" label="Toggle ON to block that rating and require PIN."/>
+      <group id="movie_blocks">
+        <setting id="block_G"    type="bool" label="Block G"            default="false"/>
+        <setting id="block_PG"   type="bool" label="Block PG"           default="false"/>
+        <setting id="block_PG13" type="bool" label="Block PG-13"        default="false"/>
+        <setting id="block_R"    type="bool" label="Block R"            default="true"/>
+        <setting id="block_NC17" type="bool" label="Block NC-17"        default="true"/>
+        <setting id="block_NR"   type="bool" label="Block NR / Unrated" default="true"/>
+      </group>
 
-    <setting id="block_G"     type="bool" label="Block G"           default="false"/>
-    <setting id="block_PG"    type="bool" label="Block PG"          default="false"/>
-    <setting id="block_PG13"  type="bool" label="Block PG-13"       default="false"/>
-    <setting id="block_R"     type="bool" label="Block R"           default="true"/>
-    <setting id="block_NC17"  type="bool" label="Block NC-17"       default="true"/>
-    <setting id="block_NR"    type="bool" label="Block NR / Unrated" default="true"/>
+    </category>
 
-  </category>
+    <!-- ================================================================
+         Category: TV Ratings
+         ================================================================ -->
+    <category id="tv_ratings" label="TV Ratings">
 
-  <!-- ================================================================
-       Category 3: TV Ratings
-       ================================================================ -->
-  <category label="TV Ratings">
+      <group id="tv_hint">
+        <setting type="lsep" label="Toggle ON to block that rating and require PIN."/>
+      </group>
 
-    <!-- Static instruction label -->
-    <setting type="lsep" label="Toggle ON to block that rating and require PIN."/>
+      <group id="tv_blocks">
+        <setting id="block_TVY"  type="bool" label="Block TV-Y"             default="false"/>
+        <setting id="block_TVY7" type="bool" label="Block TV-Y7"            default="false"/>
+        <setting id="block_TVG"  type="bool" label="Block TV-G"             default="false"/>
+        <setting id="block_TVPG" type="bool" label="Block TV-PG"            default="false"/>
+        <setting id="block_TV14" type="bool" label="Block TV-14"            default="false"/>
+        <setting id="block_TVMA" type="bool" label="Block TV-MA"            default="true"/>
+        <setting id="block_TVNR" type="bool" label="Block TV-NR / Unrated"  default="true"/>
+      </group>
 
-    <setting id="block_TVY"   type="bool" label="Block TV-Y"             default="false"/>
-    <setting id="block_TVY7"  type="bool" label="Block TV-Y7"            default="false"/>
-    <setting id="block_TVG"   type="bool" label="Block TV-G"             default="false"/>
-    <setting id="block_TVPG"  type="bool" label="Block TV-PG"            default="false"/>
-    <setting id="block_TV14"  type="bool" label="Block TV-14"            default="false"/>
-    <setting id="block_TVMA"  type="bool" label="Block TV-MA"            default="true"/>
-    <setting id="block_TVNR"  type="bool" label="Block TV-NR / Unrated"  default="true"/>
+    </category>
 
-  </category>
+    <!-- ================================================================
+         Category: Advanced
+         ================================================================ -->
+    <category id="advanced" label="Advanced">
 
-  <!-- ================================================================
-       Category 4: Advanced
-       ================================================================ -->
-  <category label="Advanced">
+      <group id="advanced_main">
+        <setting id="unrated_action" type="labelenum"
+                 label="If rating cannot be determined"
+                 values="Allow|Block"
+                 default="Block"/>
+        <setting id="tmdb_api_key" type="text"
+                 label="TMDb API Key (optional)"
+                 default=""/>
+        <setting type="lsep" label="Optional. Get a free key at themoviedb.org. Improves rating detection for streamed content."/>
+        <setting id="debug_log" type="bool" label="Enable verbose debug logging" default="false"/>
+      </group>
 
-    <setting id="unrated_action" type="labelenum"
-             label="If rating cannot be determined"
-             values="Allow|Block"
-             default="Block"/>
+    </category>
 
-    <setting id="tmdb_api_key" type="text"
-             label="TMDb API Key (optional)"
-             default=""/>
-
-    <!-- Static hint for tmdb_api_key -->
-    <setting type="lsep" label="Optional. Get a free key at themoviedb.org. Improves rating detection for streamed content."/>
-
-    <setting id="debug_log" type="bool" label="Enable verbose debug logging" default="false"/>
-
-  </category>
+  </section>
 
 </settings>
