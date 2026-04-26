@@ -23,6 +23,17 @@ Designed for **Kodi 21 Omega on Android TV** with streamed content from addons l
 
 ## Installation
 
+### Via dotJustin's Kodi Repository (recommended)
+
+Installs cleanly and receives automatic updates.
+
+1. **Enable unknown sources** — Settings → System → Add-ons → Unknown sources → On
+2. **Install the repository addon** — download [`repository.dotjustin-1.0.0.zip`](https://github.com/dot-Justin/kodi-repo/releases/latest) and install via Settings → Add-ons → Install from zip file
+3. **Install Bouncer** — Settings → Add-ons → Install from repository → dotJustin's Kodi Repository → Services → Bouncer → Install
+4. Configure via **Settings → Add-ons → Bouncer**
+
+### Manual (zip sideload)
+
 1. Download the latest `service.bouncer-x.x.x.zip` from [Releases](../../releases)
 2. In Kodi: **Settings → Add-ons → Install from zip file**
 3. Select the downloaded zip
