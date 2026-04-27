@@ -2,7 +2,7 @@
 Bouncer — Rating-based playback control for Kodi
 Addon ID: service.bouncer
 Author:   dotJustin
-Version:  1.0.1
+Version:  1.0.2
 
 Intercepts video playback and requires a PIN to continue if the content's
 rating is in the user's blocked list. Designed for Kodi 21 Omega on Android TV
@@ -110,6 +110,208 @@ def log(msg, level=xbmc.LOGDEBUG):
     addon = xbmcaddon.Addon()
     if level >= xbmc.LOGINFO or addon.getSettingBool('debug_log'):
         xbmc.log('[Bouncer] {}'.format(msg), level)
+
+
+# ---------------------------------------------------------------------------
+# PIN dialog
+# ---------------------------------------------------------------------------
+
+class PinDialog(xbmcgui.WindowDialog):
+    """D-pad-navigable PIN entry dialog that displays the block reason.
+
+    Layout (1280x720 virtual coordinates):
+
+        ┌──────────────────────────────────────┐
+        │  Bouncer — PIN Required              │
+        │  Rated TV-MA                         │  ← reason
+        │                                      │
+        │           1 2 3 4                    │  ← PIN display
+        │                                      │
+        │      [1]      [2]      [3]           │
+        │      [4]      [5]      [6]           │
+        │      [7]      [8]      [9]           │
+        │      [⌫]      [0]     [OK]           │
+        └──────────────────────────────────────┘
+
+    Returns the entered string via get_input(), or None if cancelled.
+    """
+
+    # --- Button control IDs -------------------------------------------------
+    _BTN_1   = 100
+    _BTN_2   = 101
+    _BTN_3   = 102
+    _BTN_4   = 103
+    _BTN_5   = 104
+    _BTN_6   = 105
+    _BTN_7   = 106
+    _BTN_8   = 107
+    _BTN_9   = 108
+    _BTN_DEL = 109
+    _BTN_0   = 110
+    _BTN_OK  = 111
+
+    # Kodi action IDs
+    _ACTION_BACK  = 10
+    _ACTION_BACK2 = 92
+
+    # Digit map: button ID → character
+    _DIGITS = {
+        _BTN_1: '1', _BTN_2: '2', _BTN_3: '3',
+        _BTN_4: '4', _BTN_5: '5', _BTN_6: '6',
+        _BTN_7: '7', _BTN_8: '8', _BTN_9: '9',
+        _BTN_0: '0',
+    }
+
+    def __init__(self, heading, reason):
+        super(PinDialog, self).__init__()
+        self._heading   = heading
+        self._reason    = reason
+        self._pin       = ''
+        self._confirmed = False
+        self._pin_label = None
+        self._buttons   = {}
+        self._build()
+
+    # ------------------------------------------------------------------
+    # Build controls
+    # ------------------------------------------------------------------
+
+    def _build(self):
+        # Virtual screen size Kodi uses for layout
+        sw, sh = 1280, 720
+        # Dialog box dimensions
+        dw, dh = 660, 530
+        dx = (sw - dw) // 2   # 310
+        dy = (sh - dh) // 2   # 95
+
+        # --- Background overlay (semi-transparent black) ---
+        # An empty filename with colorDiffuse renders a tinted overlay on most
+        # skins; if the skin can't resolve it the dialog still works fine.
+        self.addControl(xbmcgui.ControlImage(
+            0, 0, sw, sh, '',
+            colorDiffuse='BB000000'
+        ))
+
+        # --- Dialog box background ---
+        self.addControl(xbmcgui.ControlImage(
+            dx, dy, dw, dh, '',
+            colorDiffuse='F0121220'
+        ))
+
+        # --- Heading ---
+        self.addControl(xbmcgui.ControlLabel(
+            dx + 20, dy + 22, dw - 40, 48,
+            self._heading,
+            font='font14',
+            textColor='FFFFFFFF',
+            alignment=6   # centred
+        ))
+
+        # --- Reason / subtitle ---
+        self.addControl(xbmcgui.ControlLabel(
+            dx + 20, dy + 74, dw - 40, 38,
+            self._reason,
+            font='font13',
+            textColor='FF9999BB',
+            alignment=6
+        ))
+
+        # --- Divider ---
+        self.addControl(xbmcgui.ControlImage(
+            dx + 30, dy + 118, dw - 60, 2, '',
+            colorDiffuse='55FFFFFF'
+        ))
+
+        # --- PIN display ---
+        self._pin_label = xbmcgui.ControlLabel(
+            dx + 20, dy + 130, dw - 40, 60,
+            '- - - -',
+            font='font30',
+            textColor='FFFFFFFF',
+            alignment=6
+        )
+        self.addControl(self._pin_label)
+
+        # --- Number pad ---
+        btn_w, btn_h = 140, 65
+        gap_x, gap_y = 18, 10
+        grid_w = 3 * btn_w + 2 * gap_x        # 452
+        bx = dx + (dw - grid_w) // 2          # 414
+        by = dy + 215
+
+        pad_layout = [
+            (self._BTN_1, '1',  0, 0),
+            (self._BTN_2, '2',  1, 0),
+            (self._BTN_3, '3',  2, 0),
+            (self._BTN_4, '4',  0, 1),
+            (self._BTN_5, '5',  1, 1),
+            (self._BTN_6, '6',  2, 1),
+            (self._BTN_7, '7',  0, 2),
+            (self._BTN_8, '8',  1, 2),
+            (self._BTN_9, '9',  2, 2),
+            (self._BTN_DEL, '\u232b', 0, 3),  # ⌫
+            (self._BTN_0,  '0',       1, 3),
+            (self._BTN_OK, 'OK',      2, 3),
+        ]
+
+        for bid, label, col, row in pad_layout:
+            x = bx + col * (btn_w + gap_x)
+            y = by + row * (btn_h + gap_y)
+            btn = xbmcgui.ControlButton(x, y, btn_w, btn_h, label, alignment=6)
+            self.addControl(btn)
+            self._buttons[bid] = btn
+
+        # --- D-pad navigation ---
+        # setNavigation(up, down, left, right)
+        b = self._buttons
+        b[self._BTN_1].setNavigation(b[self._BTN_DEL], b[self._BTN_4], b[self._BTN_3],   b[self._BTN_2])
+        b[self._BTN_2].setNavigation(b[self._BTN_0],   b[self._BTN_5], b[self._BTN_1],   b[self._BTN_3])
+        b[self._BTN_3].setNavigation(b[self._BTN_OK],  b[self._BTN_6], b[self._BTN_2],   b[self._BTN_1])
+        b[self._BTN_4].setNavigation(b[self._BTN_1],   b[self._BTN_7], b[self._BTN_6],   b[self._BTN_5])
+        b[self._BTN_5].setNavigation(b[self._BTN_2],   b[self._BTN_8], b[self._BTN_4],   b[self._BTN_6])
+        b[self._BTN_6].setNavigation(b[self._BTN_3],   b[self._BTN_9], b[self._BTN_5],   b[self._BTN_4])
+        b[self._BTN_7].setNavigation(b[self._BTN_4],   b[self._BTN_DEL], b[self._BTN_9], b[self._BTN_8])
+        b[self._BTN_8].setNavigation(b[self._BTN_5],   b[self._BTN_0], b[self._BTN_7],   b[self._BTN_9])
+        b[self._BTN_9].setNavigation(b[self._BTN_6],   b[self._BTN_OK], b[self._BTN_8],  b[self._BTN_7])
+        b[self._BTN_DEL].setNavigation(b[self._BTN_7], b[self._BTN_1], b[self._BTN_OK],  b[self._BTN_0])
+        b[self._BTN_0].setNavigation(  b[self._BTN_8], b[self._BTN_2], b[self._BTN_DEL], b[self._BTN_OK])
+        b[self._BTN_OK].setNavigation( b[self._BTN_9], b[self._BTN_3], b[self._BTN_0],   b[self._BTN_DEL])
+
+        # Start focus on 5 (centre of pad)
+        self.setFocus(b[self._BTN_5])
+
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+
+    def _update_pin_display(self):
+        self._pin_label.setLabel(self._pin if self._pin else '- - - -')
+
+    def onClick(self, control_id):
+        if control_id == self._BTN_DEL:
+            self._pin = self._pin[:-1]
+            self._update_pin_display()
+        elif control_id == self._BTN_OK:
+            self._confirmed = True
+            self.close()
+        elif control_id in self._DIGITS:
+            if len(self._pin) < 8:
+                self._pin += self._DIGITS[control_id]
+                self._update_pin_display()
+
+    def onAction(self, action):
+        if action.getId() in (self._ACTION_BACK, self._ACTION_BACK2):
+            self._confirmed = False
+            self.close()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def get_input(self):
+        """Show the dialog modally. Returns the entered PIN string, or None if cancelled."""
+        self.doModal()
+        return self._pin if self._confirmed else None
 
 
 # ---------------------------------------------------------------------------
@@ -433,28 +635,21 @@ class BouncerPlayer(xbmc.Player):
     # ------------------------------------------------------------------
 
     def _require_pin(self, display_title, reason):
-        """Pause playback and present the PIN dialog.
-
-        INPUT_NUMERIC renders as a D-pad-navigable number pad on Android TV,
-        which is the only usable dialog type without a physical keyboard.
-        """
-        # Pause before showing the dialog
+        """Pause playback and present the custom PIN dialog."""
         self.pause()
         xbmc.sleep(200)
 
-        result = xbmcgui.Dialog().input(
-            'Bouncer \u2014 PIN Required',
-            type=xbmcgui.INPUT_NUMERIC
-        )
+        dialog = PinDialog('Bouncer \u2014 PIN Required', reason)
+        result = dialog.get_input()
 
-        # --- Cancelled (user pressed Back / closed dialog) ---------------
-        if result == '':
+        # --- Cancelled (Back button) --------------------------------------
+        if result is None:
             log('PIN dialog cancelled — stopping playback', xbmc.LOGINFO)
             self.stop()
             xbmc.executebuiltin('ActivateWindow(Home)')
             return
 
-        # --- Correct PIN -------------------------------------------------
+        # --- Correct PIN --------------------------------------------------
         if result == self.addon.getSetting('pin_code'):
             log('Correct PIN entered — access granted', xbmc.LOGINFO)
             unlock_mins = int(self.addon.getSetting('unlock_duration') or 0)
@@ -462,8 +657,7 @@ class BouncerPlayer(xbmc.Player):
                 with self._lock:
                     self.unlocked_until = time.time() + (unlock_mins * 60)
                 log('Session unlocked for {} minutes'.format(unlock_mins))
-            # Toggle pause to resume playback
-            self.pause()
+            self.pause()  # toggle back to playing
             xbmcgui.Dialog().notification(
                 'Bouncer',
                 'Access granted \u2713',
@@ -472,7 +666,7 @@ class BouncerPlayer(xbmc.Player):
             )
             return
 
-        # --- Incorrect PIN -----------------------------------------------
+        # --- Incorrect PIN ------------------------------------------------
         log('Incorrect PIN entered — stopping playback', xbmc.LOGINFO)
         self.stop()
         xbmcgui.Dialog().ok(
