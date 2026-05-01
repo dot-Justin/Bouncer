@@ -64,6 +64,34 @@
     </category>
 
     <!-- ================================================================
+         Category: Whitelist
+         ================================================================ -->
+    <category id="whitelist" label="Whitelist">
+
+      <group id="whitelist_info">
+        <setting type="lsep" label="Allow specific titles, shows, seasons, or episodes after entering the PIN once."/>
+      </group>
+
+      <group id="whitelist_actions">
+        <setting id="manage_whitelist" type="action" label="Manage whitelist">
+          <level>0</level>
+          <data>RunScript($CWD/script.py,manage_whitelist)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+        <setting id="clear_whitelist" type="action" label="Clear whitelist">
+          <level>1</level>
+          <data>RunScript($CWD/script.py,clear_whitelist)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
+
+    </category>
+
+    <!-- ================================================================
          Category: Advanced
          ================================================================ -->
     <category id="advanced" label="Advanced">
